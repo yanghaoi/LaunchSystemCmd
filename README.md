@@ -11,7 +11,7 @@ ZwCreateThreadEx() / CreateRemoteThread()
 CreateProcessA()
 
 ## GIF Show
-![](https://cdn.jsdelivr.net/gh/yanghaoi/LanchSystemCmd@latest/LaunchSystemCmd/Images/run.gif)
+![](https://cdn.jsdelivr.net/gh/yanghaoi/LaunchSystemCmd/LaunchSystemCmdExe/Images/run.gif)
 
 # LaunchSystemCmdDll
 System Process Dll Hijack Test :) , Command line:

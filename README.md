@@ -1,4 +1,4 @@
-# LaunchSystemCmd
+# LaunchSystemCmdExe
 launch a cmd.exe process with system permissions.
 
 ## launch cmd.exe in Session 0 

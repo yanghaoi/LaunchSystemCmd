@@ -2,9 +2,9 @@
 launch a cmd.exe process with system permissions.
 
 ### launch cmd.exe in Session 0 
-DuplicateTokenEx() / CreateProcessAsUser()
+WTSGetActiveConsoleSessionId() / ProcessIdToSessionId() / DuplicateTokenEx() / WTSEnumerateSessions() / CreateProcessAsUser()
 
-### Injetc session 7(gui system process)
+### Injetc session>0(gui system process)
 ZwCreateThreadEx() / CreateRemoteThread()
 
 ### Set Parent

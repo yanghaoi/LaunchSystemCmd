@@ -10,6 +10,7 @@
 #include <userenv.h>
 #include <wtsapi32.h>
 
+
 #pragma comment(lib, "WtsApi32.lib")
 #pragma comment(lib, "Userenv.lib") 
 
@@ -165,9 +166,23 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 	HANDLE hUserTokenDup = NULL;//复制的用户令牌  
 	HANDLE hPToken = NULL;//进程令牌  
 	DWORD dwCreationFlags;
+	
 
-	//得到当前活动的会话ID，即登录用户的会话ID  
-	dwSessionId = WTSGetActiveConsoleSessionId();
+	LPVOID pEnv = NULL;
+
+	DWORD processId = GetCurrentProcessId(); //当前进程id
+	DWORD pSessionId = 0; // 检索与指定进程关联的远程桌面服务会话。
+	
+	// 属性为 Console 没有GUI ，检索控制台会话的会话标识符
+	dwSessionId = WTSGetActiveConsoleSessionId();  
+	
+	if (ProcessIdToSessionId(processId, &pSessionId)) {
+		printf("[*] Process %u runs in session %u \n", processId, pSessionId);
+	}
+	else {
+		printf("[-] ProcessIdToSessionId error: %d \n", GetLastError());
+	}
+
 	do
 	{
 		WTSQueryUserToken(dwSessionId, &hUserToken);//读取当前登录用户的令牌信息  
@@ -216,23 +231,8 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 			break;
 		}
 
-		//设置当前进程的令牌信息  
-		if (!SetTokenInformation(hUserTokenDup, TokenSessionId, (void*)&dwSessionId, sizeof(DWORD)))
-		{
-			dwRet = GetLastError();
-			break;
-		}
-
-		//应用令牌权限  
-		if (!AdjustTokenPrivileges(hUserTokenDup, FALSE, &tp, sizeof(TOKEN_PRIVILEGES),
-			(PTOKEN_PRIVILEGES)NULL, NULL))
-		{
-			dwRet = GetLastError();
-			break;
-		}
-
-		//创建进程环境块，保证环境块是在用户桌面的环境下  
-		LPVOID pEnv = NULL;
+		// 创建进程环境块，保证环境块是在用户桌面的环境下 ,
+		// 指定是否继承当前进程的环境。如果此值为TRUE，则进程继承当前进程的环境。如果此值为FALSE，则进程不会继承当前进程的环境。
 		if (CreateEnvironmentBlock(&pEnv, hUserTokenDup, TRUE))
 		{
 			dwCreationFlags |= CREATE_UNICODE_ENVIRONMENT;
@@ -242,13 +242,63 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 			pEnv = NULL;
 		}
 
-		//创建用户进程  
-		if (!CreateProcessAsUser(hUserTokenDup, NULL, lpCommand, NULL, NULL, FALSE,
-			dwCreationFlags, pEnv, NULL, &si, &pi))
+
+		//检查当前session是否为活动
+		DWORD i,count = 0;
+		PWTS_SESSION_INFO Session;
+		// WTS_SESSION_INFO *Session;
+		if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, &Session, &count)) {
+			printf("[*] Sessions: %d \n", count);
+			for (i = 0; i < count; i++)
+			{
+				printf("[*] \tpWinStationName: %s ,SessionId: %d ,State: %d \n", Session[i].pWinStationName, Session[i].SessionId, Session[i].State);
+
+				// 通过进程ID获取GUI的SessionID,解决在两个RDP用户在线时都弹出SYSTEM窗口
+				if (Session[i].State == WTSActive && Session[i].SessionId == pSessionId)
+				{
+					//设置当前进程的令牌信息  
+					if (!SetTokenInformation(hUserTokenDup, TokenSessionId, &Session[i].SessionId, sizeof(&Session[i].SessionId)))
+					{
+						dwRet = GetLastError();
+						break;
+					}
+
+					//应用令牌权限  
+					if (!AdjustTokenPrivileges(hUserTokenDup, FALSE, &tp, sizeof(TOKEN_PRIVILEGES),
+						(PTOKEN_PRIVILEGES)NULL, NULL))
+					{
+						dwRet = GetLastError();
+						break;
+					}
+
+					//创建用户进程  
+					if (!CreateProcessAsUser(hUserTokenDup, NULL, lpCommand, NULL, NULL, FALSE,
+						dwCreationFlags, pEnv, NULL, &si, &pi))
+					{
+						dwRet = GetLastError();
+						break;
+					}
+					else {
+						printf("[+] \t\tdwProcessId:%d\n", pi.dwProcessId);
+						// Close process and thread handles. 
+						CloseHandle(pi.hProcess);
+						CloseHandle(pi.hThread);
+					}
+				}
+			}
+			
+			if (Session)
+			{
+				WTSFreeMemory(Session);
+			}
+		
+		}
+		else
 		{
-			dwRet = GetLastError();
+			printf("[-] WTSEnumerateSessions error:%d \n",GetLastError());
 			break;
 		}
+
 	} while (0);
 
 	//关闭句柄  
@@ -267,9 +317,10 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 		CloseHandle(hPToken);
 	}
 
-	// Close process and thread handles. 
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
+	if (NULL != pEnv) {
+		DestroyEnvironmentBlock(pEnv); pEnv = NULL;
+	}
+
 	return dwRet;
 }
 
@@ -541,9 +592,13 @@ int main(int argc, char* argv[])
 		/// <param name="argv"></param>
 		/// <returns></returns>
 		if (CurrentUserIsLocalSystem()) {
+			DWORD  Rt = 0;
 			printf("[+] You are already LocalSystem. \n");
-			printf("[*] Launch Process ...\n");
+			printf("[*] Launch Process ... \n" );
 			LaunchSessionProcess(const_cast<char*>("C:\\Windows\\System32\\cmd.exe"));
+			if (Rt) {
+				printf("[-] Error Code: %d \n",Rt);
+			}
 			return 0;
 		}
 

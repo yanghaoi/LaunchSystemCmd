@@ -2,3 +2,4 @@
 ZwCreateThreadExMain.cpp
 *.txt
 .vs/*
+Release/*

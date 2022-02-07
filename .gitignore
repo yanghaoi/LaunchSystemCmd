@@ -1,4 +1,9 @@
 #ignore
 .vs/*
 *.bat
-Release/*
+*.txt
+
+# Build results
+Release/
+LaunchSystemCmdExe/ZwCreateThreadExMain.cpp
+LaunchSystemCmdExe/Release/

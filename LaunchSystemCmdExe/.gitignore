@@ -1,5 +1,0 @@
-#ignore Moudles
-ZwCreateThreadExMain.cpp
-*.txt
-.vs/*
-Release/*

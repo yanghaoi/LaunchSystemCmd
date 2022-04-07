@@ -6,7 +6,7 @@
 #include <TlHelp32.h>
 #include <cstdint>
 #include <WinBase.h>
-
+#include <strsafe.h>
 #include <userenv.h>
 #include <wtsapi32.h>
 
@@ -42,6 +42,19 @@ typedef DWORD(WINAPI* typedef_ZwCreateThreadEx)(
 	DWORD dw2,
 	LPVOID pUnkown);
 #endif
+
+#pragma warning(disable:4996)
+int WriteToLog(char* str)
+{
+	FILE* log;
+	log = fopen("C:\\log.txt", "a");
+	if (log == NULL)
+		return -1;
+	fprintf(log, "%s\n", str);
+	fclose(log);
+	return 0;
+}
+
 /// <summary>
 /// 根据错误代码，返回错误详情
 /// </summary>
@@ -158,6 +171,7 @@ BOOL IsWow64(HANDLE hProcess)
 /// <returns></returns>
 DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 {
+	TCHAR pszDest[100];
 	DWORD dwRet = 0;
 	PROCESS_INFORMATION pi;
 	STARTUPINFO si;
@@ -178,6 +192,8 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 	
 	if (ProcessIdToSessionId(processId, &pSessionId)) {
 		printf("[*] Process %u runs in session %u \n", processId, pSessionId);
+		StringCchPrintf(pszDest, 100, "[*] Process %u runs in SessionId %u \n", processId, pSessionId);
+		WriteToLog(pszDest);
 	}
 	else {
 		printf("[-] ProcessIdToSessionId error: %d \n", GetLastError());
@@ -198,42 +214,24 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 		LUID luid;
 
 		//打开进程令牌  
-		if (!OpenProcessToken(GetCurrentProcess(),
-			TOKEN_ADJUST_PRIVILEGES |
-			TOKEN_QUERY |
-			TOKEN_DUPLICATE |
-			TOKEN_ASSIGN_PRIMARY |
-			TOKEN_ADJUST_SESSIONID |
-			TOKEN_READ |
-			TOKEN_WRITE, &hPToken))
+		if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &hPToken))
 		{
 			dwRet = GetLastError();
 			break;
 		}
-
-		//查找DEBUG权限的UID  
-		if (!LookupPrivilegeValue(NULL, SE_DEBUG_NAME, &luid))
-		{
-			dwRet = GetLastError();
-			break;
-		}
-
-		//设置令牌信息  
-		tp.PrivilegeCount = 1;
-		tp.Privileges[0].Luid = luid;
-		tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
 		//复制当前用户的令牌  
 		if (!DuplicateTokenEx(hPToken, MAXIMUM_ALLOWED, NULL, SecurityIdentification,
 			TokenPrimary, &hUserTokenDup))
 		{
+			printf("%d\n", __LINE__);
 			dwRet = GetLastError();
 			break;
 		}
 
 		// 创建进程环境块，保证环境块是在用户桌面的环境下 ,
 		// 指定是否继承当前进程的环境。如果此值为TRUE，则进程继承当前进程的环境。如果此值为FALSE，则进程不会继承当前进程的环境。
-		if (CreateEnvironmentBlock(&pEnv, hUserTokenDup, TRUE))
+		if (CreateEnvironmentBlock(&pEnv, hUserTokenDup, FALSE))
 		{
 			dwCreationFlags |= CREATE_UNICODE_ENVIRONMENT;
 		}
@@ -242,39 +240,39 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 			pEnv = NULL;
 		}
 
-
 		//检查当前session是否为活动
 		DWORD i,count = 0;
 		PWTS_SESSION_INFO Session;
 		// WTS_SESSION_INFO *Session;
 		if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, &Session, &count)) {
-			printf("[*] Sessions: %d \n", count);
+			printf("[*] Sessions counts: %d \n", count);
 			for (i = 0; i < count; i++)
 			{
 				printf("[*] \tpWinStationName: %s ,SessionId: %d ,State: %d \n", Session[i].pWinStationName, Session[i].SessionId, Session[i].State);
+				
+				StringCchPrintf(pszDest, 100, "pWinStationName: %s ,SessionId: %d ,State: %d \n", Session[i].pWinStationName, Session[i].SessionId, Session[i].State);
+				WriteToLog(pszDest);
 
-				// 通过进程ID获取GUI的SessionID,解决在两个RDP用户在线时都弹出SYSTEM窗口
-				if (Session[i].State == WTSActive && Session[i].SessionId == pSessionId)
+				// 通过进程ID获取GUI的SessionID,解决在两个RDP用户在线时都弹出SYSTEM窗口,但这样一来不能在Ring0下弹出GUI
+				// ((Session[i].State == WTSActive) && Session[i].SessionId == pSessionId )
+
+				// WTSDisconnected:WinStation在没有客户端的情况下登录,R0
+				// WTSActive:用户登录到WinStation,R3,登录了才有GUI。。所以这里只能判断 WTSActive
+				if (Session[i].State == WTSActive)
 				{
 					//设置当前进程的令牌信息  
-					if (!SetTokenInformation(hUserTokenDup, TokenSessionId, &Session[i].SessionId, sizeof(&Session[i].SessionId)))
+					if (!SetTokenInformation(hUserTokenDup, TokenSessionId, &Session[i].SessionId, sizeof(Session[i].SessionId)))
 					{
+						printf("%d\n", __LINE__);
 						dwRet = GetLastError();
 						break;
 					}
-
-					//应用令牌权限  
-					if (!AdjustTokenPrivileges(hUserTokenDup, FALSE, &tp, sizeof(TOKEN_PRIVILEGES),
-						(PTOKEN_PRIVILEGES)NULL, NULL))
-					{
-						dwRet = GetLastError();
-						break;
-					}
-
+	
 					//创建用户进程  
 					if (!CreateProcessAsUser(hUserTokenDup, NULL, lpCommand, NULL, NULL, FALSE,
 						dwCreationFlags, pEnv, NULL, &si, &pi))
 					{
+						printf("%d\n", __LINE__);
 						dwRet = GetLastError();
 						break;
 					}
@@ -291,7 +289,6 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 			{
 				WTSFreeMemory(Session);
 			}
-		
 		}
 		else
 		{
@@ -320,7 +317,9 @@ DWORD _stdcall LaunchSessionProcess(LPTSTR lpCommand)
 	if (NULL != pEnv) {
 		DestroyEnvironmentBlock(pEnv); pEnv = NULL;
 	}
-
+	if (dwRet != 0) {
+		_FormatErrorMessage("[-] ");
+	}
 	return dwRet;
 }
 
@@ -567,7 +566,6 @@ int enumprocess()
 
 int main(int argc, char* argv[])
 {
-
 	HANDLE Mutexlock;
 	// 获取调试权限
 	if (!EnableDebugPriv()) {
